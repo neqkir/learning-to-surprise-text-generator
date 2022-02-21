@@ -2,8 +2,6 @@
 # GRU-based char-RNN for text generation
 # learning to surprise
 
-# V4-1
-
 # modifying GRU state initialization
 # zero-initialization occurring not once per batch but once per epoch
 
