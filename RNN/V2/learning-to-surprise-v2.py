@@ -1,21 +1,9 @@
-#### implements early stopping # accuracy metrics
+## neqkir
 
-# custom training implementation
+# base RNN for the deep creator
+# a char-RNN text generator eating Mallarme and spitting mallarme-like.txt
 
-# 30 EPOCHS with early stopping
-
-# starting character Q
-
-# writing result to a file
-
-##There are two variants of the GRU implementation. The default one is based on v3 and
-##has reset gate applied to hidden
-##state before matrix multiplication. The other one is based on original and has the order reversed.
-##The second variant is compatible with CuDNNGRU (GPU-only) and allows inference on CPU.
-##Thus it has separate biases for kernel and recurrent_kernel. To use this variant,
-##set 'reset_after'=True and recurrent_activation='sigmoid'.
-
-# --> added gpu options to test and make sure right gpu api is used
+# can play with parameters temperature, dropout, EPOCHs, BATCH_SIZE etc.
 
 import tensorflow as tf
 from tensorflow.keras.layers.experimental import preprocessing
