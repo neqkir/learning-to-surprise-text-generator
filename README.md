@@ -54,9 +54,18 @@ class CustomCallback(tf.keras.callbacks.Callback):
         self.batch_size = batch_size
         self.dims = dims
    def on_epoch_end(self, epoch, logs=None):
-        self.gru_layer.reset_states(tf.random.normal((self.batch_size, self.dims), stddev=0.5, mean=0, seed=42))        
+        self.gru_layer.reset_states(tf.random.normal((self.batch_size, self.dims), \
+            stddev=0.5, mean=0, seed=42))        
 
 model.fit(train_dataset, validation_data=validation_dataset, epochs=EPOCHS, \
      callbacks = [EarlyS, CustomCallback(gru_layer, BATCH_SIZE, rnn_units)], verbose=1)
 ```
 
+and in RNN/V5 we make states trainable. 
+
+Related documentation 
+
+> trainable and noisy states in LSTM https://r2rt.com/non-zero-initial-states-for-recurrent-neural-networks.html 
+
+Linked repo https://github.com/neqkir/working-with-rnns/tree/main/stateful-rnn! : stateful LSTM with training batch size, say, 64, and inference batch size one. 
+ 
