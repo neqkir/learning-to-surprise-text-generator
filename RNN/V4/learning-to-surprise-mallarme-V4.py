@@ -316,7 +316,7 @@ end = time.time()
 print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
 print('\nRun time:', end - start)
 
-with open('mallarme-like.txt','a') as f:
+with open('generated.txt','r+') as f:
   f.write(result[0].numpy().decode('utf-8') + '\n\n' + '_'*80)
 
 ##############################################
@@ -336,29 +336,30 @@ print ("Training vocabulary: "+str(t_vocab_size)+" words.")
 
 ##### Read and word-tokenize the generated text
 
-generated_text = open("mallarme-like.txt", 'rb').read().decode(encoding='utf-8')
+with open("generated.txt", 'rb') as f:
+  
+  generated_text=f.read().decode(encoding='utf-8')
+  g_tokenizer = Tokenizer()
+  g_tokenizer.fit_on_texts([generated_text])#Builds the word index
+  g_word_counts=g_tokenizer.word_counts 
 
-g_tokenizer = Tokenizer()
-g_tokenizer.fit_on_texts([generated_text])#Builds the word index
-g_word_counts=g_tokenizer.word_counts 
+  g_vocab_size = len(g_word_counts) + 1
 
-g_vocab_size = len(g_word_counts) + 1
+  print ("Generated vocabulary: "+str(g_vocab_size)+" words.")
 
-print ("Generated vocabulary: "+str(g_vocab_size)+" words.")
+  g_word_counts=dict(g_word_counts)
 
-g_word_counts=dict(g_word_counts)
+  diff = set(g_word_counts.keys()).intersection(set(t_word_index.keys()))
+  num_words_g = sum(list(g_word_counts.values()))
+  num_words_g_in_t = sum(list(map(g_word_counts.get, list(diff))))
+  perc_words_g_in_t = 100 * num_words_g_in_t/ num_words_g
 
-diff = set(g_word_counts.keys()).intersection(set(t_word_index.keys()))
-num_words_g = sum(list(g_word_counts.values()))
-num_words_g_in_t = sum(list(map(g_word_counts.get, list(diff))))
-perc_words_g_in_t = 100 * num_words_g_in_t/ num_words_g
+  perc_words_g_in_t = "{:.2f}".format(perc_words_g_in_t)
+  output_str=perc_words_g_in_t+" % of all generated words are in the training vocabulary." 
 
-perc_words_g_in_t = "{:.2f}".format(perc_words_g_in_t)
-output_str=perc_words_g_in_t+" % of all generated words are in the training vocabulary." 
+  print ( output_str )
 
-print ( output_str )
-
-with open('mallarme-like.txt','w') as f:
+with open('mallarme-like.txt','r+') as f:
   f.write("embedding dim: " + str(embedding_dim)+"\n")
   f.write("batch size: " + str(BATCH_SIZE)+"\n")
   f.write("rnn units: " + str(rnn_units)+"\n")
@@ -369,4 +370,5 @@ with open('mallarme-like.txt','w') as f:
   f.write(output_str + '\n\n' + '_'*80+"\n")
   f.write(generated_text + '\n\n' + '_'*80)
   f.write('\nRun time:%f'  %(end - start))
+
 
