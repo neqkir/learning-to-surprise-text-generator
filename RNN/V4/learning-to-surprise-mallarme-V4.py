@@ -18,6 +18,7 @@
 # > At the end, we compute some score
 # > we score the overlap of generated text with the input vocabulary
 
+
 import tensorflow as tf
 from tensorflow.keras.layers.experimental import preprocessing
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -28,7 +29,7 @@ import os
 import time
 
 ##### TRAINING PARAMETERS
-EPOCHS=2 # we will early stop anyway
+EPOCHS=40 # we will early stop anyway
 seq_length = 100
 BATCH_SIZE = 32
 embedding_dim = 512
@@ -36,7 +37,7 @@ rnn_units = 1024
 dropout = 0.4
 
 ##### INFERENCE PARAMETERS
-temperature = 0.7
+temperature = 0.6
 
 
 #####################
@@ -355,7 +356,11 @@ output_str=perc_words_g_in_t+" % of all generated words are in the training voca
 
 print ( output_str )
 
-with open('mallarme-like.txt','w+') as f:
+i = 0
+while os.path.exists("mallarme-like-%s.txt" % i):
+    i += 1
+    
+with open("mallarme-like-%s.txt" % i,'w+') as f:
   f.write("embedding dim: " + str(embedding_dim)+"\n")
   f.write("batch size: " + str(BATCH_SIZE)+"\n")
   f.write("rnn units: " + str(rnn_units)+"\n")
