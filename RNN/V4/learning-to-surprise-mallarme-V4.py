@@ -28,7 +28,7 @@ import os
 import time
 
 ##### TRAINING PARAMETERS
-EPOCHS=40 # we will early stop anyway
+EPOCHS=2 # we will early stop anyway
 seq_length = 100
 BATCH_SIZE = 32
 embedding_dim = 512
@@ -316,8 +316,6 @@ end = time.time()
 print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
 print('\nRun time:', end - start)
 
-with open('generated.txt','r+') as f:
-  f.write(result[0].numpy().decode('utf-8') + '\n\n' + '_'*80)
 
 ##############################################
 ### goodness 
@@ -336,30 +334,28 @@ print ("Training vocabulary: "+str(t_vocab_size)+" words.")
 
 ##### Read and word-tokenize the generated text
 
-with open("generated.txt", 'rb') as f:
-  
-  generated_text=f.read().decode(encoding='utf-8')
-  g_tokenizer = Tokenizer()
-  g_tokenizer.fit_on_texts([generated_text])#Builds the word index
-  g_word_counts=g_tokenizer.word_counts 
+generated_text=result[0].numpy().decode('utf-8')
+g_tokenizer = Tokenizer()
+g_tokenizer.fit_on_texts([generated_text])#Builds the word index
+g_word_counts=g_tokenizer.word_counts 
 
-  g_vocab_size = len(g_word_counts) + 1
+g_vocab_size = len(g_word_counts) + 1
 
-  print ("Generated vocabulary: "+str(g_vocab_size)+" words.")
+print ("Generated vocabulary: "+str(g_vocab_size)+" words.")
 
-  g_word_counts=dict(g_word_counts)
+g_word_counts=dict(g_word_counts)
 
-  diff = set(g_word_counts.keys()).intersection(set(t_word_index.keys()))
-  num_words_g = sum(list(g_word_counts.values()))
-  num_words_g_in_t = sum(list(map(g_word_counts.get, list(diff))))
-  perc_words_g_in_t = 100 * num_words_g_in_t/ num_words_g
+diff = set(g_word_counts.keys()).intersection(set(t_word_index.keys()))
+num_words_g = sum(list(g_word_counts.values()))
+num_words_g_in_t = sum(list(map(g_word_counts.get, list(diff))))
+perc_words_g_in_t = 100 * num_words_g_in_t/ num_words_g
 
-  perc_words_g_in_t = "{:.2f}".format(perc_words_g_in_t)
-  output_str=perc_words_g_in_t+" % of all generated words are in the training vocabulary." 
+perc_words_g_in_t = "{:.2f}".format(perc_words_g_in_t)
+output_str=perc_words_g_in_t+" % of all generated words are in the training vocabulary." 
 
-  print ( output_str )
+print ( output_str )
 
-with open('mallarme-like.txt','r+') as f:
+with open('mallarme-like.txt','w+') as f:
   f.write("embedding dim: " + str(embedding_dim)+"\n")
   f.write("batch size: " + str(BATCH_SIZE)+"\n")
   f.write("rnn units: " + str(rnn_units)+"\n")
