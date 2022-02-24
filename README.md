@@ -61,7 +61,7 @@ model.fit(train_dataset, validation_data=validation_dataset, epochs=EPOCHS, \
      callbacks = [EarlyS, CustomCallback(gru_layer, BATCH_SIZE, rnn_units)], verbose=1)
 ```
 
-and in RNN/V5 we make states trainable. 
+and in RNN/V4 we make states trainable. 
 
 Related documentation 
 
