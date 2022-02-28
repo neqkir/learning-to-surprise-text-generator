@@ -53,6 +53,7 @@ ids_from_chars = preprocessing.StringLookup(vocabulary=list(vocab), mask_token=N
 chars_from_ids = tf.keras.layers.experimental.preprocessing.StringLookup(
     vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
 
+
 def text_from_ids(ids):
   return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
 
@@ -98,7 +99,7 @@ print(example_target_batch.shape)
 
 examples_per_epoch = len(text)//(seq_length+1)
 
-##### TRAINING
+######### FOR TRAINING
 
 ## Encoder stack
 
@@ -182,6 +183,7 @@ class Decoder(tf.keras.Model):
       return tfa.seq2seq.LuongAttention(units=dec_units, memory=memory, memory_sequence_length=memory_sequence_length)
 
   def build_initial_state(self, batch_sz, encoder_state, Dtype):
+    # setup initial states with the encoder's states
     decoder_initial_state = self.rnn_cell.get_initial_state(batch_size=batch_sz, dtype=Dtype)
     decoder_initial_state = decoder_initial_state.clone(cell_state=encoder_state)
     return decoder_initial_state
@@ -194,9 +196,10 @@ class Decoder(tf.keras.Model):
 # Test decoder stack
 
 decoder = Decoder(vocab_size, embedding_dim, units, BATCH_SIZE, 'luong')
+
 sample_x = tf.random.uniform((BATCH_SIZE, seq_length))
-decoder.attention_mechanism.setup_memory(sample_output)
-initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32)
+decoder.attention_mechanism.setup_memory(sample_output) # set encoder's output in the attention mechanism
+initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32) # set encoder's states
 
 sample_decoder_outputs = decoder(sample_x, initial_state)
 
@@ -248,7 +251,8 @@ def train_step(inp, targ, enc_hidden):
 
   return loss
 
-# Training the seq2seq
+
+###### TRAINING
 
 for epoch in range(EPOCHS):
   start = time.time()
@@ -270,18 +274,17 @@ for epoch in range(EPOCHS):
     checkpoint.save(file_prefix = checkpoint_prefix)
 
   print('Epoch {} Loss {:.4f}'.format(epoch + 1,
-                                      total_loss / steps_per_epoch))
+                                      total_loss / examples_per_epoch))
   print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
 
-def evaluate_sentence(sentence):
-  sentence = dataset_creator.preprocess_sentence(sentence)
+############ FOR GENERATION
 
-  inputs = [inp_lang.word_index[i] for i in sentence.split(' ')]
-  inputs = tf.keras.preprocessing.sequence.pad_sequences([inputs],
-                                                          maxlen=seq_length,
-                                                          padding='post')
-  inputs = tf.convert_to_tensor(inputs)
-  inference_batch_size = inputs.shape[0]
+def generate_one_step(sentence, temperature=1.0,batch_size=1):
+
+  input_chars = tf.strings.unicode_split(sentence, 'UTF-8')
+  input_ids = ids_from_chars(input_chars).to_tensor()
+
+  inference_batch_size = batch_size
   result = ''
 
   enc_start_state = [tf.zeros((inference_batch_size, units)), tf.zeros((inference_batch_size,units))]
@@ -290,8 +293,8 @@ def evaluate_sentence(sentence):
   dec_h = enc_h
   dec_c = enc_c
 
-  start_tokens = tf.fill([inference_batch_size], targ_lang.word_index['<start>'])
-  end_token = targ_lang.word_index['<end>']
+  start_tokens = tf.fill([inference_batch_size], list(input_chars)[0])
+  end_token = list(input_chars)[-1]
 
   greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler()
 
@@ -305,16 +308,49 @@ def evaluate_sentence(sentence):
 
   ### Since the BasicDecoder wraps around Decoder's rnn cell only, you have to ensure that the inputs to BasicDecoder 
   ### decoding step is output of embedding layer. tfa.seq2seq.GreedyEmbeddingSampler() takes care of this. 
-  ### You only need to get the weights of embedding layer, which can be done by decoder.embedding.variables[0] and pass this callabble to BasicDecoder's call() function
+  ### You only need to get the weights of embedding layer, which can be done by decoder.embedding.variables[0]
+  ### and pass this callabble to BasicDecoder's call() function
 
   decoder_embedding_matrix = decoder.embedding.variables[0]
 
-  outputs, _, _ = decoder_instance(decoder_embedding_matrix, start_tokens = start_tokens, end_token= end_token, initial_state=decoder_initial_state)
-  return outputs.sample_id.numpy()
+  predicted_logits, _, _ = decoder_instance(decoder_embedding_matrix, start_tokens = start_tokens, end_token= end_token, initial_state=decoder_initial_state)
 
-def translate(sentence):
-  result = evaluate_sentence(sentence)
-  print(result)
-  result = targ_lang.sequences_to_texts(result)
-  print('Input: %s' % (sentence))
-  print('Predicted translation: {}'.format(result))
+  predicted_logits = predicted_logits[:, -1, :]
+  predicted_logits = predicted_logits/temperature
+  
+  # Sample the output logits to generate token IDs.
+  predicted_ids = tf.random.categorical(predicted_logits, num_samples=1)
+  predicted_ids = tf.squeeze(predicted_ids, axis=-1)
+  
+  ####  --> check if needed predicted_ids = predicted_logits.sample_id.numpy()
+  
+  # Convert from token ids to characters
+  predicted_chars = chars_from_ids(predicted_ids)
+
+  return predicted_chars
+
+next_char = tf.constant(['La joie '])
+
+# restoring the latest checkpoint in checkpoint_dir
+checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
+
+start = time.time()
+for n in range(1000):
+    next_char, states = generate_one_step(next_char, temperature=0.8)    
+    result.append(next_char)
+
+result = tf.strings.join(result)
+end = time.time()
+print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
+print('\nRun time:', end - start)
+
+
+#### ---> check if needed
+
+### Create a mask to prevent "[UNK]" from being generated.
+##skip_ids = ids_from_chars(['[UNK]'])[:, None]
+##sparse_mask = tf.SparseTensor(values=[-float('inf')]*len(skip_ids),# Put a -inf at each bad index.
+##                              indices=skip_ids,# Match the shape to the vocabulary
+##                              dense_shape=[len(ids_from_chars.get_vocabulary())]
+##                              )
+##prediction_mask = tf.sparse.to_dense(sparse_mask)
