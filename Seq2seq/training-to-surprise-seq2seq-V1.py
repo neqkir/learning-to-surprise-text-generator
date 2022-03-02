@@ -2,14 +2,16 @@
 #
 # Seq2seq for text generation
 #
-# using TensorFlow add-ons and based on models for translation
+# Using TensorFlow add-ons and based on models for translation
 #
+# Tokenizing at word level
 #
 
 # pip install tensorflow-addons==0.11.2
 
 import tensorflow as tf
 import tensorflow_addons as tfa
+from sklearn.model_selection import train_test_split
 
 from tensorflow.keras.layers.experimental import preprocessing
 import matplotlib.pyplot as plt
@@ -28,7 +30,7 @@ FILE_PATH = "mallarme.txt"
 BUFFER_SIZE = 32000
 BATCH_SIZE = 64
 # Let's limit the #training examples for faster training
-seq_length = 100
+max_length = 100
 embedding_dim = 256
 units = 1024
 EPOCHS = 10
@@ -36,68 +38,113 @@ EPOCHS = 10
 
 ######## DATA
 
-# Read, then decode for py2 compat.
-text = open(FILE_PATH, 'rb').read().decode(encoding='utf-8')
-# length of text is the number of characters in it
-print(f'Length of text: {len(text)} characters')
+class Seq2seqTextGenDataset:
+    def __init__(self):
+        self.inp_tokenizer = None
+        self.targ_tokenizer = None
+        self.num_examples = 0
 
-# Take a look at the first 1000 characters in text
-print(text[:1000])
+    def unicode_to_ascii(self, s):
+        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
-# The unique characters in the file
-vocab = sorted(set(text))
-print(f'{len(vocab)} unique characters')
+    def preprocess_text(self, w):
+        w = self.unicode_to_ascii(w.lower().strip())
 
-ids_from_chars = preprocessing.StringLookup(vocabulary=list(vocab), mask_token=None)
+        # creating a space between a word and the punctuation following it
+        # eg: "he is a boy." => "he is a boy ."
+        # Reference:- https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
+        w = re.sub(r"([?.!,¿])", r" \1 ", w)
+        w = re.sub(r'[" "]+', " ", w)
 
-chars_from_ids = tf.keras.layers.experimental.preprocessing.StringLookup(
-    vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
+        # replacing everything with space except (a-z, A-Z, ".", "?", "!", ",")
+        w = re.sub(r"[^a-zA-Z?.!,¿']+", " ", w)
 
+        w = w.strip()
 
-def text_from_ids(ids):
-  return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
+        return w
 
-all_ids = ids_from_chars(tf.strings.unicode_split(text, 'UTF-8'))
-ids_dataset = tf.data.Dataset.from_tensor_slices(all_ids)
+    def split_input_target(self, sequence):
+      
+        input_text = '<start> ' + ''.join(sequence[:-1]) + ' <end>'
+        target_text = '<start> ' + ''.join(sequence[1:]) + ' <end>'  
 
-sequences = ids_dataset.batch(seq_length+1, drop_remainder=True)
+        return [target_text, input_text]
 
-# For training you'll need a dataset of (input, label) pairs.
-# Where input and label are sequences.
-# At each time step the input is the current character and the label is the next character.
-# Here's a function that takes a sequence as input, duplicates, and shifts it to align the input
-# and label for each timestep:
+    def create_dataset(self, path):
+        text = open(path, 'rb').read().decode(encoding='utf-8')
+        print(text[:1000])
 
-def split_input_target(sequence):
-    input_text = sequence[:-1]
-    target_text = sequence[1:]
-    return input_text, target_text
+        text = self.preprocess_text( text )
 
-dataset = sequences.map(split_input_target)
+        # Cut reminder
+        text=text[:(len(text)//max_length)*max_length]
 
-# Buffer size to shuffle the dataset
-# (TF data is designed to work with possibly infinite sequences,
-# so it doesn't attempt to shuffle the entire sequence in memory. Instead,
-# it maintains a buffer in which it shuffles elements).
+        # Split text into sequences of characters
+        text_sequences = [text[i:i+max_length] for i in range(0, len(text), max_length)]
+        sequ_pairs = [self.split_input_target(w) for w in text_sequences]
 
-dataset = (
-    dataset
-    .shuffle(BUFFER_SIZE)
-    .batch(BATCH_SIZE, drop_remainder=True)
-    .prefetch(tf.data.experimental.AUTOTUNE))
+        return zip(*sequ_pairs)
 
-len_data=len(list(dataset))
-validation_dataset = dataset.take(int(len_data*.2))
-train_dataset = dataset.skip(int(len_data*.2))
+    def tokenize(self, sequences):
+        # tokenizes input or target sequences
+        tokenizer = tf.keras.preprocessing.text.Tokenizer(filters='', oov_token='<OOV>')
+        tokenizer.fit_on_texts(sequences)
+        
+        ## tf.keras.preprocessing.text.Tokenizer.texts_to_sequences converts string (w1, w2, w3, ......, wn) 
+        ## to a list of correspoding integer ids of words (id_w1, id_w2, id_w3, ...., id_wn)
+        tensor = tokenizer.texts_to_sequences(sequences) 
 
-# Length of the vocabulary in chars
-vocab_size = len(vocab)+1
+        ## tf.keras.preprocessing.sequence.pad_sequences takes argument a list of integer id sequences 
+        ## and pads the sequences to match the longest sequences in the given input
+        tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
+
+        return tensor, tokenizer
+
+    def load_dataset(self, path):
+        # creating cleaned input, output pairs
+        targ_sequences, inp_sequences = self.create_dataset(path)
+
+        self.num_examples=len(targ_sequences)
+        print(inp_sequences[:10])
+        print("Number of input sequences "+str(len(targ_sequences)))
+        
+        input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
+        print("Size of input vocab "+str(len(inp_tokenizer.word_index)+1))
+
+        target_tensor, targ_tokenizer = self.tokenize(inp_sequences)
+        
+        return input_tensor, target_tensor, inp_tokenizer, targ_tokenizer 
+
+    def call(self, BUFFER_SIZE, BATCH_SIZE):
+        file_path = FILE_PATH
+        
+        input_tensor, target_tensor, self.inp_tokenizer, self.targ_tokenizer = self.load_dataset(file_path)
+
+        input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val = train_test_split(input_tensor, target_tensor, test_size=0.2)
+
+        train_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train))
+        train_dataset = train_dataset.shuffle(BUFFER_SIZE).batch(BATCH_SIZE, drop_remainder=True)
+
+        val_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_val, target_tensor_val))
+        val_dataset = val_dataset.batch(BATCH_SIZE, drop_remainder=True)
+
+        return train_dataset, val_dataset, self.inp_tokenizer, self.targ_tokenizer
+
+dataset_creator = Seq2seqTextGenDataset()
+train_dataset, val_dataset, inp_tokenizer, targ_tokenizer = dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
 
 example_input_batch, example_target_batch = next(iter(train_dataset))
-print(example_input_batch.shape)
-print(example_target_batch.shape)  
+example_input_batch.shape, example_target_batch.shape
 
-examples_per_epoch = len(text)//(seq_length+1)
+vocab_inp_size = len(inp_tokenizer.word_index)+1
+vocab_targ_size = len(targ_tokenizer.word_index)+1
+max_length_input = example_input_batch.shape[1]
+max_length_output = example_target_batch.shape[1]
+
+print("max_length_input, max_length_target, vocab_inp_size, vocab_targ_size")
+print(str(max_length_input)+", "+str(max_length_output)+", "+str(vocab_inp_size)+", "+str(vocab_targ_size))
+
+steps_per_epoch = dataset_creator.num_examples//BATCH_SIZE
 
 ######### FOR TRAINING
 
@@ -126,7 +173,7 @@ class Encoder(tf.keras.Model):
 
 # Test Encoder Stack
 
-encoder = Encoder(vocab_size, embedding_dim, units, BATCH_SIZE)
+encoder = Encoder(vocab_inp_size, embedding_dim, units, BATCH_SIZE)
 
 sample_hidden = encoder.initialize_hidden_state()# sample input
 sample_output, sample_h, sample_c = encoder(example_input_batch, sample_hidden)# sample output
@@ -135,6 +182,8 @@ print ('Encoder h vecotr shape: (batch size, units) {}'.format(sample_h.shape))
 print ('Encoder c vector shape: (batch size, units) {}'.format(sample_c.shape))
 
 ## Decoder stack
+
+# Custom sampler
 
 class Decoder(tf.keras.Model):
   def __init__(self, vocab_size, embedding_dim, dec_units, batch_sz, attention_type='luong'):
@@ -157,13 +206,14 @@ class Decoder(tf.keras.Model):
 
     # Create attention mechanism with memory = None
     self.attention_mechanism = self.build_attention_mechanism(self.dec_units, 
-                                                              None, self.batch_sz*[seq_length], self.attention_type)
+                                                              None, self.batch_sz*[max_length_input], self.attention_type)
 
     # Wrap attention mechanism with the fundamental rnn cell of decoder
     self.rnn_cell = self.build_rnn_cell(batch_sz)
 
     # Define the decoder with respect to fundamental rnn cell
     self.decoder = tfa.seq2seq.BasicDecoder(self.rnn_cell, sampler=self.sampler, output_layer=self.fc)
+
 
   def build_rnn_cell(self, batch_sz):
     rnn_cell = tfa.seq2seq.AttentionWrapper(self.decoder_rnn_cell, 
@@ -174,8 +224,8 @@ class Decoder(tf.keras.Model):
     # ------------- #
     # typ: Which sort of attention (Bahdanau, Luong)
     # dec_units: final dimension of attention outputs 
-    # memory: encoder hidden states of shape (batch_size, seq_length, enc_units)
-    # memory_sequence_length: 1d array of shape (batch_size) with every element set to seq_length (for masking purpose)
+    # memory: encoder hidden states of shape (batch_size, max_length_input, enc_units)
+    # memory_sequence_length: 1d array of shape (batch_size) with every element set to max_length_input (for masking purpose)
 
     if(attention_type=='bahdanau'):
       return tfa.seq2seq.BahdanauAttention(units=dec_units, memory=memory, memory_sequence_length=memory_sequence_length)
@@ -183,23 +233,22 @@ class Decoder(tf.keras.Model):
       return tfa.seq2seq.LuongAttention(units=dec_units, memory=memory, memory_sequence_length=memory_sequence_length)
 
   def build_initial_state(self, batch_sz, encoder_state, Dtype):
-    # setup initial states with the encoder's states
     decoder_initial_state = self.rnn_cell.get_initial_state(batch_size=batch_sz, dtype=Dtype)
     decoder_initial_state = decoder_initial_state.clone(cell_state=encoder_state)
     return decoder_initial_state
 
+
   def call(self, inputs, initial_state):
     x = self.embedding(inputs)
-    outputs, _, _ = self.decoder(x, initial_state=initial_state, sequence_length=self.batch_sz*[seq_length-1])
+    outputs, _, _ = self.decoder(x, initial_state=initial_state, sequence_length=self.batch_sz*[max_length_output-1])
     return outputs
 
 # Test decoder stack
 
-decoder = Decoder(vocab_size, embedding_dim, units, BATCH_SIZE, 'luong')
-
-sample_x = tf.random.uniform((BATCH_SIZE, seq_length))
-decoder.attention_mechanism.setup_memory(sample_output) # set encoder's output in the attention mechanism
-initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32) # set encoder's states
+decoder = Decoder(vocab_targ_size, embedding_dim, units, BATCH_SIZE, 'luong')
+sample_x = tf.random.uniform((BATCH_SIZE, max_length_output))
+decoder.attention_mechanism.setup_memory(sample_output)
+initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32)
 
 sample_decoder_outputs = decoder(sample_x, initial_state)
 
@@ -210,8 +259,8 @@ print("Decoder Outputs Shape: ", sample_decoder_outputs.rnn_output.shape)
 optimizer = tf.keras.optimizers.Adam()
 
 def loss_function(real, pred):
-  # real shape = (BATCH_SIZE, seq_length)
-  # pred shape = (BATCH_SIZE, seq_length, tar_vocab_size )
+  # real shape = (BATCH_SIZE, max_length)
+  # pred shape = (BATCH_SIZE, max_length, tar_vocab_size )
   cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
   loss = cross_entropy(y_true=real, y_pred=pred)
   mask = tf.logical_not(tf.math.equal(real,0))   #output 0 for y=0 else output 1
@@ -261,7 +310,7 @@ for epoch in range(EPOCHS):
   total_loss = 0
   # print(enc_hidden[0].shape, enc_hidden[1].shape)
 
-  for (batch, (inp, targ)) in enumerate(train_dataset.take(examples_per_epoch)):
+  for (batch, (inp, targ)) in enumerate(train_dataset.take(steps_per_epoch)):
     batch_loss = train_step(inp, targ, enc_hidden)
     total_loss += batch_loss
 
@@ -274,17 +323,21 @@ for epoch in range(EPOCHS):
     checkpoint.save(file_prefix = checkpoint_prefix)
 
   print('Epoch {} Loss {:.4f}'.format(epoch + 1,
-                                      total_loss / examples_per_epoch))
+                                      total_loss / steps_per_epoch))
   print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
 
 ############ FOR GENERATION
 
-def generate_one_step(sentence, temperature=1.0,batch_size=1):
-
-  input_chars = tf.strings.unicode_split(sentence, 'UTF-8')
-  input_ids = ids_from_chars(input_chars).to_tensor()
-
-  inference_batch_size = batch_size
+def evaluate_sentence(text):
+  text = dataset_creator.preprocess_text(text)
+  text = '<start> ' + text + ' <end>'
+  
+  inputs = [inp_tokenizer.word_index[i] for i in text.split(' ')]
+  inputs = tf.keras.preprocessing.sequence.pad_sequences([inputs],
+                                                          maxlen=max_length_input,
+                                                          padding='post')
+  inputs = tf.convert_to_tensor(inputs)
+  inference_batch_size = inputs.shape[0]
   result = ''
 
   enc_start_state = [tf.zeros((inference_batch_size, units)), tf.zeros((inference_batch_size,units))]
@@ -293,8 +346,8 @@ def generate_one_step(sentence, temperature=1.0,batch_size=1):
   dec_h = enc_h
   dec_c = enc_c
 
-  start_tokens = tf.fill([inference_batch_size], list(input_chars)[0])
-  end_token = list(input_chars)[-1]
+  start_tokens = tf.fill([inference_batch_size], targ_tokenizer.word_index['<start>'])
+  end_token = targ_tokenizer.word_index['<end>']
 
   greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler()
 
@@ -308,49 +361,47 @@ def generate_one_step(sentence, temperature=1.0,batch_size=1):
 
   ### Since the BasicDecoder wraps around Decoder's rnn cell only, you have to ensure that the inputs to BasicDecoder 
   ### decoding step is output of embedding layer. tfa.seq2seq.GreedyEmbeddingSampler() takes care of this. 
-  ### You only need to get the weights of embedding layer, which can be done by decoder.embedding.variables[0]
-  ### and pass this callabble to BasicDecoder's call() function
+  ### You only need to get the weights of embedding layer, which can be done by decoder.embedding.variables[0] and pass this callabble to BasicDecoder's call() function
 
   decoder_embedding_matrix = decoder.embedding.variables[0]
 
-  predicted_logits, _, _ = decoder_instance(decoder_embedding_matrix, start_tokens = start_tokens, end_token= end_token, initial_state=decoder_initial_state)
+  outputs, _, _ = decoder_instance(decoder_embedding_matrix, start_tokens = start_tokens, end_token= end_token, initial_state=decoder_initial_state)
+  return outputs.sample_id.numpy()
 
-  predicted_logits = predicted_logits[:, -1, :]
-  predicted_logits = predicted_logits/temperature
-  
-  # Sample the output logits to generate token IDs.
-  predicted_ids = tf.random.categorical(predicted_logits, num_samples=1)
-  predicted_ids = tf.squeeze(predicted_ids, axis=-1)
-  
-  ####  --> check if needed predicted_ids = predicted_logits.sample_id.numpy()
-  
-  # Convert from token ids to characters
-  predicted_chars = chars_from_ids(predicted_ids)
+def generate_next_word(sentence):
+  result = evaluate_sentence(sentence)
+  print(result)
+  result = targ_tokenizer.sequences_to_texts(result)
+  print('Input: %s' % (sentence))
+  print('Predicted output: {}'.format(result))
+  return result
 
-  return predicted_chars
-
-next_char = tf.constant(['La joie '])
+words = u'La joie '
 
 # restoring the latest checkpoint in checkpoint_dir
 checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 
 start = time.time()
-for n in range(1000):
-    next_char, states = generate_one_step(next_char, temperature=0.8)    
-    result.append(next_char)
+for n in range(100):
+    words = generate_next_word(words)    
 
-result = tf.strings.join(result)
+print( words )
+
 end = time.time()
 print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
 print('\nRun time:', end - start)
 
+## print to file
 
-#### ---> check if needed
-
-### Create a mask to prevent "[UNK]" from being generated.
-##skip_ids = ids_from_chars(['[UNK]'])[:, None]
-##sparse_mask = tf.SparseTensor(values=[-float('inf')]*len(skip_ids),# Put a -inf at each bad index.
-##                              indices=skip_ids,# Match the shape to the vocabulary
-##                              dense_shape=[len(ids_from_chars.get_vocabulary())]
-##                              )
-##prediction_mask = tf.sparse.to_dense(sparse_mask)
+i = 0
+while os.path.exists("mallarme-like-Seq2Seq-V4-%s.txt" % i):
+    i += 1
+    
+with open("mallarme-like-Seq2Seq-V4-%s.txt" % i,'w+') as f:
+  f.write("embedding dim: " + str(embedding_dim)+"\n")
+  f.write("batch size: " + str(BATCH_SIZE)+"\n")
+  f.write("rnn units: " + str(units)+"\n")
+  f.write("sequence length: " + str(max_length)+"\n")
+  f.write("epochs: " + str(EPOCHS)+"\n\n"+'_'*80+"\n")
+  f.write(words + '\n\n' + '_'*80)
+  f.write('\nRun time:%f'  %(end - start))
