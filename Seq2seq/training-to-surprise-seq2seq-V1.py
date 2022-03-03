@@ -30,10 +30,10 @@ FILE_PATH = "mallarme.txt"
 BUFFER_SIZE = 32000
 BATCH_SIZE = 64
 # Let's limit the #training examples for faster training
-max_length = 100
+max_words=10
 embedding_dim = 256
 units = 1024
-EPOCHS = 10
+EPOCHS = 60
 
 
 ######## DATA
@@ -63,12 +63,25 @@ class Seq2seqTextGenDataset:
 
         return w
 
-    def split_input_target(self, sequence):
-      
-        input_text = '<start> ' + ''.join(sequence[:-1]) + ' <end>'
-        target_text = '<start> ' + ''.join(sequence[1:]) + ' <end>'  
+    def add_start_end_tok(self, w):
+        
+        return '<start> ' + ' '.join(w) + ' <end>'
 
-        return [target_text, input_text]
+    def add_start_tok(self, w):
+        
+        return '<start> ' + ' '.join(w) 
+
+    def add_end_tok(self, w):
+        
+        return ' '.join(w) + ' <end>'
+
+    def split_input_target(self, text, words_per_sequ):
+
+        text = text.split()
+        text=text[:(len(text)//words_per_sequ)*words_per_sequ]
+        text_sequences = [text[i:i+words_per_sequ] for i in range(0, len(text), words_per_sequ)]
+
+        return [[self.add_start_end_tok(w[1:]), self.add_start_end_tok(w[:-1])] for w in text_sequences]
 
     def create_dataset(self, path):
         text = open(path, 'rb').read().decode(encoding='utf-8')
@@ -76,12 +89,10 @@ class Seq2seqTextGenDataset:
 
         text = self.preprocess_text( text )
 
-        # Cut reminder
-        text=text[:(len(text)//max_length)*max_length]
-
         # Split text into sequences of characters
-        text_sequences = [text[i:i+max_length] for i in range(0, len(text), max_length)]
-        sequ_pairs = [self.split_input_target(w) for w in text_sequences]
+        sequ_pairs = self.split_input_target(text, max_words)
+
+        # print(sequ_pairs[:5])
 
         return zip(*sequ_pairs)
 
@@ -104,22 +115,23 @@ class Seq2seqTextGenDataset:
         # creating cleaned input, output pairs
         targ_sequences, inp_sequences = self.create_dataset(path)
 
-        self.num_examples=len(targ_sequences)
-        print(inp_sequences[:10])
-        print("Number of input sequences "+str(len(targ_sequences)))
-        
-        input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
-        print("Size of input vocab "+str(len(inp_tokenizer.word_index)+1))
+        print("3 input und target sequences :")
 
+        for i in range(3):
+            print (i)
+            print(targ_sequences[i])
+            print(inp_sequences[i])
+
+        self.num_examples=len(targ_sequences)
+        input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
         target_tensor, targ_tokenizer = self.tokenize(inp_sequences)
-        
         return input_tensor, target_tensor, inp_tokenizer, targ_tokenizer 
 
     def call(self, BUFFER_SIZE, BATCH_SIZE):
-        file_path = FILE_PATH
         
-        input_tensor, target_tensor, self.inp_tokenizer, self.targ_tokenizer = self.load_dataset(file_path)
+        file_path = FILE_PATH        
 
+        input_tensor, target_tensor, self.inp_tokenizer, self.targ_tokenizer = self.load_dataset(file_path)
         input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val = train_test_split(input_tensor, target_tensor, test_size=0.2)
 
         train_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train))
@@ -274,6 +286,8 @@ checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(optimizer=optimizer,
                                  encoder=encoder,
                                  decoder=decoder)
+manager = tf.train.CheckpointManager(
+    checkpoint, directory=checkpoint_dir, max_to_keep=3)
 
 @tf.function
 def train_step(inp, targ, enc_hidden):
@@ -283,7 +297,7 @@ def train_step(inp, targ, enc_hidden):
     enc_output, enc_h, enc_c = encoder(inp, enc_hidden)
 
     dec_input = targ[ : , :-1 ] # Ignore <end> token
-    real = targ[ : , 1: ]         # ignore <start> token
+    real = targ[ : , 1: ]       # ignore <start> token
 
     # Set the AttentionMechanism object with encoder_outputs
     decoder.attention_mechanism.setup_memory(enc_output)
@@ -321,6 +335,7 @@ for epoch in range(EPOCHS):
   # saving (checkpoint) the model every 2 epochs
   if (epoch + 1) % 2 == 0:
     checkpoint.save(file_prefix = checkpoint_prefix)
+    
 
   print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                       total_loss / steps_per_epoch))
@@ -330,9 +345,11 @@ for epoch in range(EPOCHS):
 
 def evaluate_sentence(text):
   text = dataset_creator.preprocess_text(text)
+
   text = '<start> ' + text + ' <end>'
   
   inputs = [inp_tokenizer.word_index[i] for i in text.split(' ')]
+
   inputs = tf.keras.preprocessing.sequence.pad_sequences([inputs],
                                                           maxlen=max_length_input,
                                                           padding='post')
@@ -376,19 +393,19 @@ def generate_next_word(sentence):
   print('Predicted output: {}'.format(result))
   return result
 
-words = u'La joie '
+words = [u'Plusieurs fois vint un Camarade, le même ']
 
 # restoring the latest checkpoint in checkpoint_dir
-checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
-
+checkpoint.restore(manager.latest_checkpoint)
+ 
 start = time.time()
-for n in range(100):
-    words = generate_next_word(words)    
+for n in range(2):
+    words = generate_next_word(words[0])    
 
 print( words )
 
 end = time.time()
-print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
+print(words[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
 print('\nRun time:', end - start)
 
 ## print to file
