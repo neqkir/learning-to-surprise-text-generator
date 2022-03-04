@@ -422,3 +422,4 @@ with open("mallarme-like-Seq2Seq-V4-%s.txt" % i,'w+') as f:
   f.write("epochs: " + str(EPOCHS)+"\n\n"+'_'*80+"\n")
   f.write(words + '\n\n' + '_'*80)
   f.write('\nRun time:%f'  %(end - start))
+ 
