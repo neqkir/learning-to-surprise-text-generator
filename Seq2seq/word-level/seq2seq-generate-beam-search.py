@@ -29,6 +29,8 @@ import time
 
 ######## PARAMETERS
 
+BEAM_WIDTH=100 ## decoder beam width
+
 FILE_PATH = "mallarme.txt"
 BUFFER_SIZE = 32000
 BATCH_SIZE = 64
@@ -319,8 +321,6 @@ def train_step(inp, targ, enc_hidden):
 
 
 ############ FOR GENERATION
-
-BEAM_WIDTH=100
 
 def beam_evaluate_sentence(text, beam_width=3):
     
