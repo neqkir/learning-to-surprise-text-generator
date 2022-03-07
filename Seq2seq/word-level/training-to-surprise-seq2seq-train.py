@@ -115,12 +115,19 @@ class Seq2seqTextGenDataset:
         # creating cleaned input, output pairs
         targ_sequences, inp_sequences = self.create_dataset(path)
 
-        print("3 input und target sequences :")
-
         for i in range(3):
-            print (i)
-            print(targ_sequences[i])
-            print(inp_sequences[i])
+            print (str(i)+"/n"+str(targ_sequences[i])+"/n"+str(inp_sequences[i]))
+
+        # -->
+        #0
+        #<start> action pour les autres editions de ce texte , <end>
+        #<start> l action pour les autres editions de ce texte <end>
+        #1
+        #<start> l action restreinte . petit air guerrier ce me <end>
+        #<start> voir l action restreinte . petit air guerrier ce <end>
+        #2
+        #<start> hormis l y taire que je sente du foyer <end>
+        #<start> va hormis l y taire que je sente du <end>
 
         self.num_examples=len(targ_sequences)
         input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
@@ -340,86 +347,3 @@ for epoch in range(EPOCHS):
   print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                       total_loss / steps_per_epoch))
   print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
-
-############ FOR GENERATION
-
-def evaluate_sentence(text):
-  text = dataset_creator.preprocess_text(text)
-
-  text = '<start> ' + text + ' <end>'
-  
-  inputs = [inp_tokenizer.word_index[i] for i in text.split(' ')]
-
-  inputs = tf.keras.preprocessing.sequence.pad_sequences([inputs],
-                                                          maxlen=max_length_input,
-                                                          padding='post')
-  inputs = tf.convert_to_tensor(inputs)
-  inference_batch_size = inputs.shape[0]
-  result = ''
-
-  enc_start_state = [tf.zeros((inference_batch_size, units)), tf.zeros((inference_batch_size,units))]
-  enc_out, enc_h, enc_c = encoder(inputs, enc_start_state)
-
-  dec_h = enc_h
-  dec_c = enc_c
-
-  start_tokens = tf.fill([inference_batch_size], targ_tokenizer.word_index['<start>'])
-  end_token = targ_tokenizer.word_index['<end>']
-
-  greedy_sampler = tfa.seq2seq.GreedyEmbeddingSampler()
-
-  # Instantiate BasicDecoder object
-  decoder_instance = tfa.seq2seq.BasicDecoder(cell=decoder.rnn_cell, sampler=greedy_sampler, output_layer=decoder.fc)
-  # Setup Memory in decoder stack
-  decoder.attention_mechanism.setup_memory(enc_out)
-
-  # set decoder_initial_state
-  decoder_initial_state = decoder.build_initial_state(inference_batch_size, [enc_h, enc_c], tf.float32)
-
-  ### Since the BasicDecoder wraps around Decoder's rnn cell only, you have to ensure that the inputs to BasicDecoder 
-  ### decoding step is output of embedding layer. tfa.seq2seq.GreedyEmbeddingSampler() takes care of this. 
-  ### You only need to get the weights of embedding layer, which can be done by decoder.embedding.variables[0] and pass this callabble to BasicDecoder's call() function
-
-  decoder_embedding_matrix = decoder.embedding.variables[0]
-
-  outputs, _, _ = decoder_instance(decoder_embedding_matrix, start_tokens = start_tokens, end_token= end_token, initial_state=decoder_initial_state)
-  return outputs.sample_id.numpy()
-
-def generate_next_word(sentence):
-  result = evaluate_sentence(sentence)
-  print(result)
-  result = targ_tokenizer.sequences_to_texts(result)
-  print('Input: %s' % (sentence))
-  print('Predicted output: {}'.format(result))
-  return result
-
-words = [u'Plusieurs fois vint un Camarade, le même ']
-
-# restoring the latest checkpoint in checkpoint_dir
-checkpoint.restore(manager.latest_checkpoint)
- 
-start = time.time()
-for n in range(2):
-    words = generate_next_word(words[0])    
-
-print( words )
-
-end = time.time()
-print(words[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
-print('\nRun time:', end - start)
-
-## print to file
-
-i = 0
-while os.path.exists("mallarme-like-Seq2Seq-V4-%s.txt" % i):
-    i += 1
-    
-with open("mallarme-like-Seq2Seq-V4-%s.txt" % i,'w+') as f:
-  f.write("embedding dim: " + str(embedding_dim)+"\n")
-  f.write("batch size: " + str(BATCH_SIZE)+"\n")
-  f.write("rnn units: " + str(units)+"\n")
-  f.write("sequence length: " + str(max_length)+"\n")
-  f.write("epochs: " + str(EPOCHS)+"\n\n"+'_'*80+"\n")
-  f.write(words + '\n\n' + '_'*80)
-  f.write('\nRun time:%f'  %(end - start))
- 
