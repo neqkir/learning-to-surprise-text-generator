@@ -28,9 +28,9 @@ import time
 
 FILE_PATH = "mallarme.txt"
 BUFFER_SIZE = 32000
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 # Let's limit the #training examples for faster training
-max_words=10
+max_words=20
 embedding_dim = 256
 units = 1024
 EPOCHS = 60
@@ -53,11 +53,11 @@ class Seq2seqTextGenDataset:
         # creating a space between a word and the punctuation following it
         # eg: "he is a boy." => "he is a boy ."
         # Reference:- https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
-        w = re.sub(r"([?.!,¿])", r" \1 ", w)
+        w = re.sub(r"([?.!,¿’'])", r" \1 ", w)
         w = re.sub(r'[" "]+', " ", w)
 
         # replacing everything with space except (a-z, A-Z, ".", "?", "!", ",")
-        w = re.sub(r"[^a-zA-Z?.!,¿']+", " ", w)
+        w = re.sub(r"[^a-zA-Z?.!,¿'’]+", " ", w)
 
         w = w.strip()
 
@@ -293,9 +293,17 @@ checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(optimizer=optimizer,
                                  encoder=encoder,
                                  decoder=decoder)
+
 manager = tf.train.CheckpointManager(
     checkpoint, directory=checkpoint_dir, max_to_keep=3)
 
+checkpoint.restore(manager.latest_checkpoint)
+
+if manager.latest_checkpoint:
+    print("Restored from {}".format(manager.latest_checkpoint))
+else:
+    print("Initializing from scratch.")
+    
 @tf.function
 def train_step(inp, targ, enc_hidden):
   loss = 0
@@ -341,8 +349,8 @@ for epoch in range(EPOCHS):
                                                    batch_loss.numpy()))
   # saving (checkpoint) the model every 2 epochs
   if (epoch + 1) % 2 == 0:
-    checkpoint.save(file_prefix = checkpoint_prefix)
-    
+    save_path = manager.save()
+    print("Saved checkpoint for epoch {}: {}".format(int(epoch+1), save_path))
 
   print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                       total_loss / steps_per_epoch))
