@@ -29,13 +29,11 @@ import time
 
 ######## PARAMETERS
 
-BEAM_WIDTH=100 ## decoder beam width
-
 FILE_PATH = "mallarme.txt"
 BUFFER_SIZE = 32000
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 # Let's limit the #training examples for faster training
-max_words=10
+max_words=20
 embedding_dim = 256
 units = 1024
 EPOCHS = 60
@@ -58,11 +56,11 @@ class Seq2seqTextGenDataset:
         # creating a space between a word and the punctuation following it
         # eg: "he is a boy." => "he is a boy ."
         # Reference:- https://stackoverflow.com/questions/3645931/python-padding-punctuation-with-white-spaces-keeping-punctuation
-        w = re.sub(r"([?.!,¿])", r" \1 ", w)
+        w = re.sub(r"([?.!,¿’'])", r" \1 ", w)
         w = re.sub(r'[" "]+', " ", w)
 
         # replacing everything with space except (a-z, A-Z, ".", "?", "!", ",")
-        w = re.sub(r"[^a-zA-Z?.!,¿']+", " ", w)
+        w = re.sub(r"[^a-zA-Z?.!,¿'’]+", " ", w)
 
         w = w.strip()
 
@@ -285,12 +283,15 @@ def loss_function(real, pred):
   loss = tf.reduce_mean(loss)
   return loss
 
-checkpoint_dir = './training_checkpoints'
-checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
-checkpoint = tf.train.Checkpoint(optimizer=optimizer,
+checkpoint_dir='./training_checkpoints'
+
+checkpoint_prefix=os.path.join(checkpoint_dir, "ckpt")
+
+checkpoint=tf.train.Checkpoint(optimizer=optimizer,
                                  encoder=encoder,
                                  decoder=decoder)
-manager = tf.train.CheckpointManager(
+
+manager=tf.train.CheckpointManager(
     checkpoint, directory=checkpoint_dir, max_to_keep=3)
 
 @tf.function
@@ -318,9 +319,8 @@ def train_step(inp, targ, enc_hidden):
 
   return loss
 
-
-
 ############ FOR GENERATION
+BEAM_WIDTH=100
 
 def beam_evaluate_sentence(text, beam_width=3):
     
@@ -377,7 +377,6 @@ def beam_evaluate_sentence(text, beam_width=3):
   # final_state = tfa.seq2seq.BeamSearchDecoderState object.
   # Sequence Length = [inference_batch_size, beam_width] details the maximum length of the beams that are generated
 
-
   # outputs.predicted_id.shape = (inference_batch_size, time_step_outputs, beam_width)
   # outputs.beam_search_decoder_output.scores.shape = (inference_batch_size, time_step_outputs, beam_width)
   # Convert the shape of outputs and beam_scores to (inference_batch_size, beam_width, time_step_outputs)
@@ -390,9 +389,12 @@ def format_case(text):
 
     # deal with spaces around punctuation
     text=re.sub(r'\s*([.,!?()])\s*', r'\1 ', text)
+    text=re.sub(r'\s*([’\'])\s*', r'\1', text)
     
     # upper after punctuation
     text='. '.join(map(lambda s: s.strip().capitalize(), text.split('.')))
+    text='? '.join(map(lambda s: s.strip().capitalize(), text.split('?')))
+    text='! '.join(map(lambda s: s.strip().capitalize(), text.split('!')))
 
     return text
 
@@ -440,6 +442,6 @@ with open("mallarme-like-Seq2Seq-V6-%s.txt" % i,'w+') as f:
   f.write("embedding dim: " + str(embedding_dim)+"\n")
   f.write("batch size: " + str(BATCH_SIZE)+"\n")
   f.write("rnn units: " + str(units)+"\n")
-  f.write("sequence length: " + str(max_words)+"\n")
+  f.write("input sequences length: " + str(max_words)+"\n")
   f.write("epochs: " + str(EPOCHS)+"\n\n"+'_'*80+"\n")
   f.write(words + '\n\n' + '_'*80)
