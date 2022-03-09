@@ -26,22 +26,22 @@ import time
 
 ######## PARAMETERS
 
-FILE_PATH = "mallarme.txt"
-BUFFER_SIZE = 32000
-BATCH_SIZE = 32
+FILE_PATH="mallarme.txt"
+BUFFER_SIZE=32000
+BATCH_SIZE=32
+SEQ_SHIFT=5 
+
 # Let's limit the #training examples for faster training
 max_words=20
-embedding_dim = 256
-units = 1024
-EPOCHS = 60
+embedding_dim=256
+units=1024
+EPOCHS=60
 
 
 ######## DATA
-
 class Seq2seqTextGenDataset:
     def __init__(self):
-        self.inp_tokenizer = None
-        self.targ_tokenizer = None
+        self.tokenizer=None
         self.num_examples = 0
 
     def unicode_to_ascii(self, s):
@@ -67,21 +67,13 @@ class Seq2seqTextGenDataset:
         
         return '<start> ' + ' '.join(w) + ' <end>'
 
-    def add_start_tok(self, w):
-        
-        return '<start> ' + ' '.join(w) 
-
-    def add_end_tok(self, w):
-        
-        return ' '.join(w) + ' <end>'
-
     def split_input_target(self, text, words_per_sequ):
 
         text = text.split()
         text=text[:(len(text)//words_per_sequ)*words_per_sequ]
         text_sequences = [text[i:i+words_per_sequ] for i in range(0, len(text), words_per_sequ)]
 
-        return [[self.add_start_end_tok(w[1:]), self.add_start_end_tok(w[:-1])] for w in text_sequences]
+        return [[self.add_start_end_tok(w[:-SEQ_SHIFT]), self.add_start_end_tok(w[SEQ_SHIFT:])] for w in text_sequences]
 
     def create_dataset(self, path):
         text = open(path, 'rb').read().decode(encoding='utf-8')
@@ -98,18 +90,18 @@ class Seq2seqTextGenDataset:
 
     def tokenize(self, sequences):
         # tokenizes input or target sequences
-        tokenizer = tf.keras.preprocessing.text.Tokenizer(filters='', oov_token='<OOV>')
-        tokenizer.fit_on_texts(sequences)
+        self.tokenizer = tf.keras.preprocessing.text.Tokenizer(filters='', oov_token='<OOV>')
+        self.tokenizer.fit_on_texts(sequences)
         
         ## tf.keras.preprocessing.text.Tokenizer.texts_to_sequences converts string (w1, w2, w3, ......, wn) 
         ## to a list of correspoding integer ids of words (id_w1, id_w2, id_w3, ...., id_wn)
-        tensor = tokenizer.texts_to_sequences(sequences) 
+        tensor = self.tokenizer.texts_to_sequences(sequences) 
 
         ## tf.keras.preprocessing.sequence.pad_sequences takes argument a list of integer id sequences 
         ## and pads the sequences to match the longest sequences in the given input
         tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
 
-        return tensor, tokenizer
+        return tensor, self.tokenizer
 
     def load_dataset(self, path):
         # creating cleaned input, output pairs
@@ -132,13 +124,13 @@ class Seq2seqTextGenDataset:
         self.num_examples=len(targ_sequences)
         input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
         target_tensor, targ_tokenizer = self.tokenize(inp_sequences)
-        return input_tensor, target_tensor, inp_tokenizer, targ_tokenizer 
+        return input_tensor, target_tensor, self.tokenizer 
 
     def call(self, BUFFER_SIZE, BATCH_SIZE):
         
         file_path = FILE_PATH        
 
-        input_tensor, target_tensor, self.inp_tokenizer, self.targ_tokenizer = self.load_dataset(file_path)
+        input_tensor, target_tensor, self.tokenizer=self.load_dataset(file_path)
         input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val = train_test_split(input_tensor, target_tensor, test_size=0.2)
 
         train_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train))
@@ -147,21 +139,20 @@ class Seq2seqTextGenDataset:
         val_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_val, target_tensor_val))
         val_dataset = val_dataset.batch(BATCH_SIZE, drop_remainder=True)
 
-        return train_dataset, val_dataset, self.inp_tokenizer, self.targ_tokenizer
+        return train_dataset, val_dataset, self.tokenizer 
 
 dataset_creator = Seq2seqTextGenDataset()
-train_dataset, val_dataset, inp_tokenizer, targ_tokenizer = dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
+train_dataset, val_dataset, tokenizer= dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
 
 example_input_batch, example_target_batch = next(iter(train_dataset))
 example_input_batch.shape, example_target_batch.shape
 
-vocab_inp_size = len(inp_tokenizer.word_index)+1
-vocab_targ_size = len(targ_tokenizer.word_index)+1
+vocab_size = len(tokenizer.word_index)+1
 max_length_input = example_input_batch.shape[1]
 max_length_output = example_target_batch.shape[1]
 
-print("max_length_input, max_length_target, vocab_inp_size, vocab_targ_size")
-print(str(max_length_input)+", "+str(max_length_output)+", "+str(vocab_inp_size)+", "+str(vocab_targ_size))
+print("max_length_input, max_length_target, vocab_size")
+print(str(max_length_input)+", "+str(max_length_output)+", "+str(vocab_size) )
 
 steps_per_epoch = dataset_creator.num_examples//BATCH_SIZE
 
@@ -297,7 +288,8 @@ checkpoint = tf.train.Checkpoint(optimizer=optimizer,
 manager = tf.train.CheckpointManager(
     checkpoint, directory=checkpoint_dir, max_to_keep=3)
 
-checkpoint.restore(manager.latest_checkpoint)
+if manager.latest_checkpoint:
+    checkpoint.restore(manager.latest_checkpoint)
 
 if manager.latest_checkpoint:
     print("Restored from {}".format(manager.latest_checkpoint))
