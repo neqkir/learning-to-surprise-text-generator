@@ -37,14 +37,14 @@ max_words=20
 embedding_dim = 256
 units = 1024
 EPOCHS = 60
+SEQ_SHIFT=5 
 
 
 ######## DATA
 
 class Seq2seqTextGenDataset:
     def __init__(self):
-        self.inp_tokenizer = None
-        self.targ_tokenizer = None
+        self.tokenizer=None
         self.num_examples = 0
 
     def unicode_to_ascii(self, s):
@@ -76,7 +76,7 @@ class Seq2seqTextGenDataset:
         text=text[:(len(text)//words_per_sequ)*words_per_sequ]
         text_sequences = [text[i:i+words_per_sequ] for i in range(0, len(text), words_per_sequ)]
 
-        return [[self.add_start_end_tok(w[1:]), self.add_start_end_tok(w[:-1])] for w in text_sequences]
+        return [[self.add_start_end_tok(w[:-SEQ_SHIFT]), self.add_start_end_tok(w[SEQ_SHIFT:])] for w in text_sequences]
 
     def create_dataset(self, path):
         text = open(path, 'rb').read().decode(encoding='utf-8')
@@ -93,18 +93,18 @@ class Seq2seqTextGenDataset:
 
     def tokenize(self, sequences):
         # tokenizes input or target sequences
-        tokenizer = tf.keras.preprocessing.text.Tokenizer(filters='', oov_token='<OOV>')
-        tokenizer.fit_on_texts(sequences)
+        self.tokenizer = tf.keras.preprocessing.text.Tokenizer(filters='', oov_token='<OOV>')
+        self.tokenizer.fit_on_texts(sequences)
         
         ## tf.keras.preprocessing.text.Tokenizer.texts_to_sequences converts string (w1, w2, w3, ......, wn) 
         ## to a list of correspoding integer ids of words (id_w1, id_w2, id_w3, ...., id_wn)
-        tensor = tokenizer.texts_to_sequences(sequences) 
+        tensor = self.tokenizer.texts_to_sequences(sequences) 
 
         ## tf.keras.preprocessing.sequence.pad_sequences takes argument a list of integer id sequences 
         ## and pads the sequences to match the longest sequences in the given input
         tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
 
-        return tensor, tokenizer
+        return tensor, self.tokenizer
 
     def load_dataset(self, path):
         # creating cleaned input, output pairs
@@ -127,13 +127,13 @@ class Seq2seqTextGenDataset:
         self.num_examples=len(targ_sequences)
         input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
         target_tensor, targ_tokenizer = self.tokenize(inp_sequences)
-        return input_tensor, target_tensor, inp_tokenizer, targ_tokenizer 
+        return input_tensor, target_tensor, self.tokenizer 
 
     def call(self, BUFFER_SIZE, BATCH_SIZE):
         
         file_path = FILE_PATH        
 
-        input_tensor, target_tensor, self.inp_tokenizer, self.targ_tokenizer = self.load_dataset(file_path)
+        input_tensor, target_tensor, self.tokenizer=self.load_dataset(file_path)
         input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val = train_test_split(input_tensor, target_tensor, test_size=0.2)
 
         train_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train))
@@ -142,21 +142,20 @@ class Seq2seqTextGenDataset:
         val_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_val, target_tensor_val))
         val_dataset = val_dataset.batch(BATCH_SIZE, drop_remainder=True)
 
-        return train_dataset, val_dataset, self.inp_tokenizer, self.targ_tokenizer
+        return train_dataset, val_dataset, self.tokenizer 
 
 dataset_creator = Seq2seqTextGenDataset()
-train_dataset, val_dataset, inp_tokenizer, targ_tokenizer = dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
+train_dataset, val_dataset, tokenizer= dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
 
 example_input_batch, example_target_batch = next(iter(train_dataset))
 example_input_batch.shape, example_target_batch.shape
 
-vocab_inp_size = len(inp_tokenizer.word_index)+1
-vocab_targ_size = len(targ_tokenizer.word_index)+1
+vocab_size = len(tokenizer.word_index)+1
 max_length_input = example_input_batch.shape[1]
 max_length_output = example_target_batch.shape[1]
 
-print("max_length_input, max_length_target, vocab_inp_size, vocab_targ_size")
-print(str(max_length_input)+", "+str(max_length_output)+", "+str(vocab_inp_size)+", "+str(vocab_targ_size))
+print("max_length_input, max_length_target, vocab_size")
+print(str(max_length_input)+", "+str(max_length_output)+", "+str(vocab_size) )
 
 steps_per_epoch = dataset_creator.num_examples//BATCH_SIZE
 
@@ -187,7 +186,7 @@ class Encoder(tf.keras.Model):
 
 # Test Encoder Stack
 
-encoder = Encoder(vocab_inp_size, embedding_dim, units, BATCH_SIZE)
+encoder = Encoder(vocab_size, embedding_dim, units, BATCH_SIZE)
 
 sample_hidden = encoder.initialize_hidden_state()# sample input
 sample_output, sample_h, sample_c = encoder(example_input_batch, sample_hidden)# sample output
@@ -259,7 +258,7 @@ class Decoder(tf.keras.Model):
 
 # Test decoder stack
 
-decoder = Decoder(vocab_targ_size, embedding_dim, units, BATCH_SIZE, 'luong')
+decoder = Decoder(vocab_size, embedding_dim, units, BATCH_SIZE, 'luong')
 sample_x = tf.random.uniform((BATCH_SIZE, max_length_output))
 decoder.attention_mechanism.setup_memory(sample_output)
 initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32)
@@ -274,7 +273,7 @@ optimizer = tf.keras.optimizers.Adam()
 
 def loss_function(real, pred):
   # real shape = (BATCH_SIZE, max_length)
-  # pred shape = (BATCH_SIZE, max_length, tar_vocab_size )
+  # pred shape = (BATCH_SIZE, max_length, vocab_size )
   cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
   loss = cross_entropy(y_true=real, y_pred=pred)
   mask = tf.logical_not(tf.math.equal(real,0))   #output 0 for y=0 else output 1
@@ -320,7 +319,7 @@ def train_step(inp, targ, enc_hidden):
   return loss
 
 ############ FOR GENERATION
-BEAM_WIDTH=100
+BEAM_WIDTH=32
 
 def beam_evaluate_sentence(text, beam_width=3):
     
@@ -329,7 +328,7 @@ def beam_evaluate_sentence(text, beam_width=3):
 
   text = '<start> ' + text + ' <end>'
 
-  inputs = [inp_tokenizer.word_index[i] for i in text.split(' ')]
+  inputs = [tokenizer.word_index[i] for i in text.split(' ')]
 
   maxlen=len(inputs)
 
@@ -347,8 +346,8 @@ def beam_evaluate_sentence(text, beam_width=3):
   dec_h = enc_h
   dec_c = enc_c
 
-  start_tokens = tf.fill([inference_batch_size], targ_tokenizer.word_index['<start>'])
-  end_token = targ_tokenizer.word_index['<end>']
+  start_tokens = tf.fill([inference_batch_size], tokenizer.word_index['<start>'])
+  end_token = tokenizer.word_index['<end>']
   
   # From official documentation
   # NOTE If you are using the BeamSearchDecoder with a cell wrapped in AttentionWrapper, then you must ensure that:
@@ -404,7 +403,7 @@ def beam_generate_next_word(sentence):
   result_str=''
   for beam, score in zip(result, beam_scores):
     print(beam.shape, score.shape)
-    output = targ_tokenizer.sequences_to_texts(beam)
+    output = tokenizer.sequences_to_texts(beam)
     output = [a[:a.index('<end>')] for a in output]
     beam_score = [a.sum() for a in score]
     print('Input: %s' % (sentence))
@@ -419,7 +418,17 @@ def beam_generate_next_word(sentence):
         result_str+='\n\n'
   return result_str  
    
-words = u'De fait, on commence, à l’endroit de ces suprêmes ou intactes \
+words = u'« Fumier ! » accompagné de pieds dans la grille,  se profère violemment : je comprends qui l’aménité  nomme, eh ! \
+bien même d’un soulaud, grand  gars le visage aux barreaux, elle me vexe malgré  moi ; est-ce caste, du tout, je ne mesure, \
+individu  à individu, de différence, en ce moment, et ne  parviens à ne pas considérer le forcené, titubant  et vociférant, \
+comme un homme ou à nier  le ressentiment à son endroit. Très raide, il me  scrute avec animosité. Impossible de l’annuler,  \
+mentalement : de parfaire l’œuvre de la boisson,  le coucher, d’avance, en la poussière et qu’il ne soit pas ce colosse tout à coup grossier et méchant. \
+Sans que je cède même par un pugilat qui  illustrerait, sur le gazon, la lutte des classes, à  ses nouvelles provocations débordantes. \
+Le mal  qui le ruine, l’ivrognerie, y pourvoira, à ma  place, au point que le sachant, je souffre de mon  mutisme, gardé indifférent, \
+qui me fait complice.\
+Un énervement d’états contradictoires, oiseux,  faussés et la contagion jusqu’à moi, par du trouble,  de quelque imbécile ébriété.\
+Même le calme, obligatoire dans une région  d’échos, comme on y trempe, je l’ai, particulièrement  les soirs de dimanche, jusqu’au silence.\
+De fait, on commence, à l’endroit de ces suprêmes ou intactes \
 aristocraties que nous gardions, littérature et arts, la feinte d’un besoin presque un culte : \
 on se détourne, esthétiquement, des jeux intermédiaires proposés au gros du public, \
 vers l’exception et tel moindre indice, \
@@ -433,10 +442,10 @@ words = beam_generate_next_word(words)
 ## print to file
 
 i = 0
-while os.path.exists("mallarme-like-Seq2Seq-V6-%s.txt" % i):
+while os.path.exists("mallarme-like-Seq2Seq-V7-%s.txt" % i):
     i += 1
     
-with open("mallarme-like-Seq2Seq-V6-%s.txt" % i,'w+') as f:
+with open("mallarme-like-Seq2Seq-V7-%s.txt" % i,'w+') as f:
   f.write("Seq2seq with beam search\n")
   f.write("beam search width: " + str(BEAM_WIDTH)+"\n")
   f.write("embedding dim: " + str(embedding_dim)+"\n")
