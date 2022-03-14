@@ -6,7 +6,7 @@
 #
 # Tokenizing at word level
 #
-# Experimenting with nuclear sampling
+# Targets are inputs shifted by SEQ_SHIFT
 #
 
 # pip install tensorflow-addons==0.11.2
