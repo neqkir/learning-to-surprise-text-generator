@@ -6,6 +6,8 @@
 #
 # Tokenizing at word level
 #
+# Experimenting with nuclear sampling
+#
 
 # pip install tensorflow-addons==0.11.2
 
@@ -39,6 +41,7 @@ EPOCHS=60
 
 
 ######## DATA
+
 class Seq2seqTextGenDataset:
     def __init__(self):
         self.tokenizer=None
@@ -101,7 +104,7 @@ class Seq2seqTextGenDataset:
         ## and pads the sequences to match the longest sequences in the given input
         tensor = tf.keras.preprocessing.sequence.pad_sequences(tensor, padding='post')
 
-        return tensor, self.tokenizer
+        return tensor
 
     def load_dataset(self, path):
         # creating cleaned input, output pairs
@@ -122,15 +125,15 @@ class Seq2seqTextGenDataset:
         #<start> va hormis l y taire que je sente du <end>
 
         self.num_examples=len(targ_sequences)
-        input_tensor, inp_tokenizer = self.tokenize(targ_sequences)
-        target_tensor, targ_tokenizer = self.tokenize(inp_sequences)
-        return input_tensor, target_tensor, self.tokenizer 
+        input_tensor = self.tokenize(targ_sequences)
+        target_tensor = self.tokenize(inp_sequences)
+        return input_tensor, target_tensor  
 
     def call(self, BUFFER_SIZE, BATCH_SIZE):
         
         file_path = FILE_PATH        
 
-        input_tensor, target_tensor, self.tokenizer=self.load_dataset(file_path)
+        input_tensor, target_tensor=self.load_dataset(file_path)
         input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val = train_test_split(input_tensor, target_tensor, test_size=0.2)
 
         train_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_train, target_tensor_train))
@@ -139,10 +142,11 @@ class Seq2seqTextGenDataset:
         val_dataset = tf.data.Dataset.from_tensor_slices((input_tensor_val, target_tensor_val))
         val_dataset = val_dataset.batch(BATCH_SIZE, drop_remainder=True)
 
-        return train_dataset, val_dataset, self.tokenizer 
+        return train_dataset, val_dataset  
 
 dataset_creator = Seq2seqTextGenDataset()
-train_dataset, val_dataset, tokenizer= dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
+train_dataset, val_dataset= dataset_creator.call(BUFFER_SIZE, BATCH_SIZE)
+tokenizer=dataset_creator.tokenizer
 
 example_input_batch, example_target_batch = next(iter(train_dataset))
 example_input_batch.shape, example_target_batch.shape
@@ -183,7 +187,7 @@ class Encoder(tf.keras.Model):
 
 # Test Encoder Stack
 
-encoder = Encoder(vocab_inp_size, embedding_dim, units, BATCH_SIZE)
+encoder = Encoder(vocab_size, embedding_dim, units, BATCH_SIZE)
 
 sample_hidden = encoder.initialize_hidden_state()# sample input
 sample_output, sample_h, sample_c = encoder(example_input_batch, sample_hidden)# sample output
@@ -213,7 +217,7 @@ class Decoder(tf.keras.Model):
 
     # Sampler
     self.sampler = tfa.seq2seq.sampler.TrainingSampler()
-
+    
     # Create attention mechanism with memory = None
     self.attention_mechanism = self.build_attention_mechanism(self.dec_units, 
                                                               None, self.batch_sz*[max_length_input], self.attention_type)
@@ -255,7 +259,7 @@ class Decoder(tf.keras.Model):
 
 # Test decoder stack
 
-decoder = Decoder(vocab_targ_size, embedding_dim, units, BATCH_SIZE, 'luong')
+decoder = Decoder(vocab_size, embedding_dim, units, BATCH_SIZE, 'luong')
 sample_x = tf.random.uniform((BATCH_SIZE, max_length_output))
 decoder.attention_mechanism.setup_memory(sample_output)
 initial_state = decoder.build_initial_state(BATCH_SIZE, [sample_h, sample_c], tf.float32)
@@ -270,7 +274,7 @@ optimizer = tf.keras.optimizers.Adam()
 
 def loss_function(real, pred):
   # real shape = (BATCH_SIZE, max_length)
-  # pred shape = (BATCH_SIZE, max_length, tar_vocab_size )
+  # pred shape = (BATCH_SIZE, max_length, vocab_size )
   cross_entropy = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
   loss = cross_entropy(y_true=real, y_pred=pred)
   mask = tf.logical_not(tf.math.equal(real,0))   #output 0 for y=0 else output 1
@@ -279,23 +283,17 @@ def loss_function(real, pred):
   loss = tf.reduce_mean(loss)
   return loss
 
-checkpoint_dir = './training_checkpoints'
-checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
-checkpoint = tf.train.Checkpoint(optimizer=optimizer,
+checkpoint_dir='./training_checkpoints'
+
+checkpoint_prefix=os.path.join(checkpoint_dir, "ckpt")
+
+checkpoint=tf.train.Checkpoint(optimizer=optimizer,
                                  encoder=encoder,
                                  decoder=decoder)
 
-manager = tf.train.CheckpointManager(
+manager=tf.train.CheckpointManager(
     checkpoint, directory=checkpoint_dir, max_to_keep=3)
 
-if manager.latest_checkpoint:
-    checkpoint.restore(manager.latest_checkpoint)
-
-if manager.latest_checkpoint:
-    print("Restored from {}".format(manager.latest_checkpoint))
-else:
-    print("Initializing from scratch.")
-    
 @tf.function
 def train_step(inp, targ, enc_hidden):
   loss = 0
@@ -320,7 +318,6 @@ def train_step(inp, targ, enc_hidden):
   optimizer.apply_gradients(zip(gradients, variables))
 
   return loss
-
 
 ###### TRAINING
 
